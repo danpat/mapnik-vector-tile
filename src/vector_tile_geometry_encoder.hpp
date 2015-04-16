@@ -4,11 +4,14 @@
 // vector tile
 #include "vector_tile.pb.h"
 #include <mapnik/vertex.hpp>
+#include <mapnik/geometry.hpp>
+#include <mapnik/util/geometry_to_wkt.hpp>
 #include "vector_tile_config.hpp"
 
 #include <cstdlib>
 #include <cmath>
 #include <sstream>
+#include <iostream>
 
 namespace mapnik { namespace vector_tile_impl {
 
@@ -224,6 +227,74 @@ inline unsigned encode_geometry(T & path,
     }
     return count;
 }
+
+inline void encode_ring(mapnik::geometry::linear_ring const& ring,
+                            vector_tile::Tile_Feature & current_feature,
+                            int32_t & start_x,
+                            int32_t & start_y,
+                            unsigned path_multiplier)
+{
+    const int cmd_bits = 3;
+    int32_t cur_x = 0;
+    int32_t cur_y = 0;
+    bool move_to = true;
+    bool line_to = true;
+    std::size_t line_to_length = ring.size() - 2;
+    std::size_t count = 0;
+    for (auto const& pt : ring)
+    {
+        if (move_to)
+        {
+            // move_to
+            move_to = false;
+            line_to = true;
+            current_feature.add_geometry(9); // move_to
+        }
+        else if (line_to)
+        {
+            line_to = false;
+            current_feature.add_geometry((line_to_length << cmd_bits) | 2);
+        }
+        else if (count == line_to_length + 1)
+        {
+            current_feature.add_geometry(15); // close_path
+            break;
+        }
+        // Compute delta to the previous coordinate.
+        cur_x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
+        cur_y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
+        int32_t dx = cur_x - start_x;
+        int32_t dy = cur_y - start_y;
+        // Manual zigzag encoding.
+        current_feature.add_geometry((dx << 1) ^ (dx >> 31));
+        current_feature.add_geometry((dy << 1) ^ (dy >> 31));
+        start_x = cur_x;
+        start_y = cur_y;
+        ++count;
+    }
+}
+
+inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
+                                vector_tile::Tile_Feature & current_feature,
+                                int32_t & x_,
+                                int32_t & y_,
+                                unsigned tolerance,
+                                unsigned path_multiplier)
+{
+
+    // exterior ring
+    encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier);
+    // interior rings
+    for (auto const& ring : poly.interior_rings)
+    {
+        if (ring.size() > 3)
+        {
+            encode_ring(ring, current_feature, x_, y_, path_multiplier);
+        }
+    }
+    return 1; // FIXME
+}
+
 
 }} // end ns
 
