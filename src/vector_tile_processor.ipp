@@ -24,9 +24,12 @@
 #include <mapnik/util/noncopyable.hpp>
 #include <mapnik/transform_path_adapter.hpp>
 #include <mapnik/geometry_is_empty.hpp>
+#include <mapnik/geometry_is_valid.hpp>
+#include <mapnik/geometry_is_simple.hpp>
 #include <mapnik/geometry_envelope.hpp>
 #include <mapnik/geometry_adapters.hpp>
 #include <mapnik/util/is_clockwise.hpp>
+#include <mapnik/util/geometry_to_wkt.hpp>
 //#include <mapnik/simplify.hpp>
 //#include <mapnik/simplify_converter.hpp>
 #include <mapnik/geometry_correct.hpp>
@@ -700,10 +703,15 @@ inline bool check_polygon(mapnik::geometry::polygon const& poly)
 inline void correct_winding_order(mapnik::geometry::polygon & poly)
 {
     bool is_clockwise = mapnik::util::is_clockwise(poly.exterior_ring);
+    if (!is_clockwise)
+    {
+        std::cerr << "correcting exterior ring" << std::endl;
+        boost::geometry::reverse(poly.exterior_ring);
+    }
 
     for (auto & ring : poly.interior_rings)
     {
-        if ( is_clockwise == mapnik::util::is_clockwise(ring))
+        if (mapnik::util::is_clockwise(ring))
         {
             std::cerr << "correcting interior ring" << std::endl;
             boost::geometry::reverse(ring);
@@ -1222,13 +1230,16 @@ struct encoder_visitor {
                 {
                     coord_transformer<double> transformer(t_, prj_trans_);
                     mapnik::geometry::polygon transformed_poly;
-                    //std::cerr << "input poly check=" << check_polygon(poly) << std::endl;
                     boost::geometry::transform(poly, transformed_poly, transformer);
                     correct_winding_order(transformed_poly);
-                    //boost::geometry::correct(transformed_poly); // ensure winding orders of rings are correct after reprojecting
-                    //std::cerr << "transformed poly check=" << check_polygon(transformed_poly) << std::endl;
+                    //if (!mapnik::geometry::is_simple(transformed_poly))
+                    //{
+                        //std::string wkt;
+                        //mapnik::util::to_wkt(wkt,transformed_poly);
+                        //std::cerr << wkt << std::endl;
+                    //}
                     va_type va(transformed_poly);
-                    path_count += backend_.add_path(va, tolerance_);
+                    path_count += backend_.add_path(va, 0);//tolerance_);
                 }
             }
         }
