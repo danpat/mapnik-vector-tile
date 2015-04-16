@@ -274,6 +274,12 @@ inline void encode_ring(mapnik::geometry::linear_ring const& ring,
     }
 }
 
+inline bool is_clockwise(vector_tile::Tile_Feature & current_feature, int start_index)
+{
+    // TODO - decode single ring and calculate signed area
+    return true;
+}
+
 inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
                                 vector_tile::Tile_Feature & current_feature,
                                 int32_t & x_,
@@ -282,14 +288,26 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
                                 unsigned path_multiplier)
 {
 
+    unsigned exterior_id = current_feature.geometry_size();
     // exterior ring
     encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier);
+    // check winding order
+    if (!is_clockwise(current_feature, exterior_id))
+    {
+        std::cerr << "FAIL" << std::endl;
+    }
     // interior rings
     for (auto const& ring : poly.interior_rings)
     {
         if (ring.size() > 3)
         {
+            unsigned ring_id = current_feature.geometry_size();
             encode_ring(ring, current_feature, x_, y_, path_multiplier);
+            // check winding order
+            //if (is_clockwise(current_feature, ring_id))
+            //{
+            //    std::cerr << "FAIL" << std::endl;
+            //}
         }
     }
     return 1; // FIXME
