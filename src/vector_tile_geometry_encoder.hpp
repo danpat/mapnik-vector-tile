@@ -237,6 +237,8 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
                         int32_t & start_y,
                         unsigned path_multiplier)
 {
+    int32_t x0 = start_x;
+    int32_t y0 = start_y;
     int32_t x = 0;
     int32_t y = 0;
     // calculate x/y deltas and discard dupes
@@ -244,7 +246,6 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
     deltas_cont deltas;
     std::size_t num_deltas = ring.size() - 1;
     deltas.reserve(num_deltas);
-
     for (std::size_t i = 0; i< num_deltas; ++i)
     {
         auto const& pt = ring[i];
@@ -253,14 +254,19 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
         y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
         int32_t dx = x - start_x;
         int32_t dy = y - start_y;
-        if (dx == 0 && dy == 0) continue;
+        if (i > 0 && dx == 0 && dy == 0) continue;
         deltas.emplace_back(dx, dy);
         start_x = x;
         start_y = y;
     }
 
-    if (deltas.size() < 3) return false;
-
+    if (deltas.size() < 3)
+    {
+        //restore starting x/y
+        start_x = x0;
+        start_y = y0;
+        return false;
+    }
     // encode deltas into VT geometry
     bool move_to = true;
     bool line_to = true;
