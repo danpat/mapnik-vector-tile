@@ -588,12 +588,18 @@ mapnik::geometry::geometry round_trip(mapnik::geometry::geometry const& geom,
     backend.stop_tile_layer();
     if (tile.layers_size() != 1)
     {
-        throw std::runtime_error("expected 1 layer in `round_trip`");
+        std::stringstream s;
+        s << "expected 1 layer in 'round_trip', found ";
+        s << tile.layers_size();
+        throw std::runtime_error(s.str());
     }
     vector_tile::Tile_Layer const& layer = tile.layers(0);
     if (layer.features_size() != 1)
     {
-        throw std::runtime_error("expected 1 feature in `round_trip`");
+        std::stringstream s;
+        s << "expected 1 feature in 'round_trip', found ";
+        s << layer.features_size();
+        throw std::runtime_error(s.str());
     }
     vector_tile::Tile_Feature const& f = layer.features(0);
     unsigned z = 0;
