@@ -240,11 +240,14 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
     int32_t x = 0;
     int32_t y = 0;
     // calculate x/y deltas and discard dupes
-#if 0
+
     deltas_cont deltas;
-    deltas.reserve(ring.size());
-    for (auto const& pt: ring)
+    std::size_t num_deltas = ring.size() - 1;
+    deltas.reserve(num_deltas);
+
+    for (std::size_t i = 0; i< num_deltas; ++i)
     {
+        auto const& pt = ring[i];
         // Compute delta to the previous coordinate.
         x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
         y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
@@ -256,49 +259,35 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
         start_y = y;
     }
 
-    //if (deltas.size() < 4) return false;
-#endif
+    if (deltas.size() < 3) return false;
 
     // encode deltas into VT geometry
-    int32_t count = 0;
     bool move_to = true;
     bool line_to = true;
     const int cmd_bits = 3;
-    // int32_t line_to_length = static_cast<int32_t>(deltas.size()) - 2;
-    int32_t line_to_length = static_cast<int32_t>(ring.size()) - 2;
-    for (auto const& pt : ring)
+    int32_t line_to_length = static_cast<int32_t>(deltas.size()) - 1;
+
+    for (auto const& pt : deltas)
     {
         if (move_to)
         {
-            // move_to
             move_to = false;
             line_to = true;
-            current_feature.add_geometry(9); // move_to
+            current_feature.add_geometry(9); // 1 | (move_to << 3)
         }
         else if (line_to)
         {
             line_to = false;
-            current_feature.add_geometry((line_to_length << cmd_bits) | 2);
+            current_feature.add_geometry((line_to_length << cmd_bits) | 2); // len | (line_to << 3)
         }
-        else if (count == line_to_length + 1)
-        {
-            current_feature.add_geometry(15); // close_path
-            break;
-        }
-        x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
-        y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
-        int32_t dx = x - start_x;
-        int32_t dy = y - start_y;
-
-        //int32_t dx = std::get<0>(pt);
-        //int32_t dy = std::get<1>(pt);
+        int32_t dx = std::get<0>(pt);
+        int32_t dy = std::get<1>(pt);
         // Manual zigzag encoding.
         current_feature.add_geometry((dx << 1) ^ (dx >> 31));
         current_feature.add_geometry((dy << 1) ^ (dy >> 31));
-        start_x = x;
-        start_y = y;
-        ++count;
     }
+
+    current_feature.add_geometry(15); // close_path
     return true;
 }
 
@@ -307,7 +296,9 @@ inline bool check_ring( vector_tile::Tile_Feature const& feature, unsigned id, b
     mapnik::geometry::linear_ring ring;
     double x = 0;
     double y = 0;
-    assert(feature.geometry(id++) == 9);// move_to/len=1
+    uint32_t geom = static_cast<uint32_t>(feature.geometry(id++));
+    if (geom == 0) return true;// empty
+    assert(geom == 9);// move_to/len=1
     int32_t dx = feature.geometry(id++);
     int32_t dy = feature.geometry(id++);
     dx = ((dx >> 1) ^ (-(dx & 1)));
@@ -315,7 +306,7 @@ inline bool check_ring( vector_tile::Tile_Feature const& feature, unsigned id, b
     x += dx;
     y += dy;
     ring.add_coord(x, y);
-    uint32_t geom = static_cast<uint32_t>(feature.geometry(id++));
+    geom = static_cast<uint32_t>(feature.geometry(id++));
     uint32_t len = geom >> 3;
     for (uint32_t i = 0; i < len; ++i)
     {
@@ -351,24 +342,27 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
 
     unsigned exterior_id = current_feature.geometry_size();
     // exterior ring
-    encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier);
-
-    // check winding order
-    if (!check_ring(current_feature, exterior_id, false))
+    if (encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier))
     {
-        std::cerr << "FAIL exterior" << std::endl;
-    }
-    // interior rings
-    for (auto const& ring : poly.interior_rings)
-    {
-        if (ring.size() > 3)
+        // check winding order
+        if (!check_ring(current_feature, exterior_id, false))
         {
-            unsigned ring_id = current_feature.geometry_size();
-            encode_ring(ring, current_feature, x_, y_, path_multiplier);
-            // check winding order
-            if (check_ring(current_feature, ring_id, true))
+            std::cerr << "FAIL exterior" << std::endl;
+        }
+        // interior rings
+        for (auto const& ring : poly.interior_rings)
+        {
+            if (ring.size() > 3)
             {
-                std::cerr << "FAIL interior" << std::endl;
+                unsigned ring_id = current_feature.geometry_size();
+                if (encode_ring(ring, current_feature, x_, y_, path_multiplier))
+                {
+                    // check winding order
+                    if (check_ring(current_feature, ring_id, true))
+                    {
+                        std::cerr << "FAIL interior" << std::endl;
+                    }
+                }
             }
         }
     }
