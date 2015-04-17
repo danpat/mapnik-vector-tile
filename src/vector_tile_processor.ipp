@@ -1232,15 +1232,7 @@ struct encoder_visitor {
                     mapnik::geometry::polygon transformed_poly;
                     boost::geometry::transform(poly, transformed_poly, transformer);
                     correct_winding_order(transformed_poly);
-                    //std::cerr << std::boolalpha << mapnik::geometry::is_simple(transformed_poly) << " " << mapnik::geometry::is_valid(transformed_poly) << std::endl;
-                    //if (!mapnik::geometry::is_simple(transformed_poly))
-                    //{
-                        //std::string wkt;
-                        //mapnik::util::to_wkt(wkt,transformed_poly);
-                        //std::cerr << wkt << std::endl;
-                    //}
-                    //va_type va(transformed_poly);
-                    path_count += backend_.add_path(transformed_poly, 0);//tolerance_);
+                    path_count += backend_.add_path(transformed_poly, 0);
                 }
             }
         }

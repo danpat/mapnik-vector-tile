@@ -7,11 +7,12 @@
 #include <mapnik/geometry.hpp>
 #include <mapnik/util/geometry_to_wkt.hpp>
 #include "vector_tile_config.hpp"
-
+#include "vector_tile_geometry_decoder.hpp"
 #include <cstdlib>
 #include <cmath>
 #include <sstream>
 #include <iostream>
+#include <cassert>
 
 namespace mapnik { namespace vector_tile_impl {
 
@@ -228,19 +229,43 @@ inline unsigned encode_geometry(T & path,
     return count;
 }
 
-inline void encode_ring(mapnik::geometry::linear_ring const& ring,
-                            vector_tile::Tile_Feature & current_feature,
-                            int32_t & start_x,
-                            int32_t & start_y,
-                            unsigned path_multiplier)
+using deltas_cont = std::vector<std::tuple<int32_t,int32_t>>;
+
+inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
+                        vector_tile::Tile_Feature & current_feature,
+                        int32_t & start_x,
+                        int32_t & start_y,
+                        unsigned path_multiplier)
 {
-    const int cmd_bits = 3;
-    int32_t cur_x = 0;
-    int32_t cur_y = 0;
+    int32_t x = 0;
+    int32_t y = 0;
+    // calculate x/y deltas and discard dupes
+#if 0
+    deltas_cont deltas;
+    deltas.reserve(ring.size());
+    for (auto const& pt: ring)
+    {
+        // Compute delta to the previous coordinate.
+        x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
+        y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
+        int32_t dx = x - start_x;
+        int32_t dy = y - start_y;
+        if (dx == 0 && dy == 0) continue;
+        deltas.emplace_back(dx, dy);
+        start_x = x;
+        start_y = y;
+    }
+
+    //if (deltas.size() < 4) return false;
+#endif
+
+    // encode deltas into VT geometry
+    int32_t count = 0;
     bool move_to = true;
     bool line_to = true;
-    std::size_t line_to_length = ring.size() - 2;
-    std::size_t count = 0;
+    const int cmd_bits = 3;
+    // int32_t line_to_length = static_cast<int32_t>(deltas.size()) - 2;
+    int32_t line_to_length = static_cast<int32_t>(ring.size()) - 2;
     for (auto const& pt : ring)
     {
         if (move_to)
@@ -260,24 +285,60 @@ inline void encode_ring(mapnik::geometry::linear_ring const& ring,
             current_feature.add_geometry(15); // close_path
             break;
         }
-        // Compute delta to the previous coordinate.
-        cur_x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
-        cur_y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
-        int32_t dx = cur_x - start_x;
-        int32_t dy = cur_y - start_y;
+        x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
+        y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
+        int32_t dx = x - start_x;
+        int32_t dy = y - start_y;
+
+        //int32_t dx = std::get<0>(pt);
+        //int32_t dy = std::get<1>(pt);
         // Manual zigzag encoding.
         current_feature.add_geometry((dx << 1) ^ (dx >> 31));
         current_feature.add_geometry((dy << 1) ^ (dy >> 31));
-        start_x = cur_x;
-        start_y = cur_y;
+        start_x = x;
+        start_y = y;
         ++count;
     }
+    return true;
 }
 
-inline bool is_clockwise(vector_tile::Tile_Feature & current_feature, int start_index)
+inline bool check_ring( vector_tile::Tile_Feature const& feature, unsigned id, bool check)
 {
-    // TODO - decode single ring and calculate signed area
-    return true;
+    mapnik::geometry::linear_ring ring;
+    double x = 0;
+    double y = 0;
+    assert(feature.geometry(id++) == 9);// move_to/len=1
+    int32_t dx = feature.geometry(id++);
+    int32_t dy = feature.geometry(id++);
+    dx = ((dx >> 1) ^ (-(dx & 1)));
+    dy = ((dy >> 1) ^ (-(dy & 1)));
+    x += dx;
+    y += dy;
+    ring.add_coord(x, y);
+    uint32_t geom = static_cast<uint32_t>(feature.geometry(id++));
+    uint32_t len = geom >> 3;
+    for (uint32_t i = 0; i < len; ++i)
+    {
+        dx = feature.geometry(id++);
+        dy = feature.geometry(id++);
+        dx = ((dx >> 1) ^ (-(dx & 1)));
+        dy = ((dy >> 1) ^ (-(dy & 1)));
+        x += dx;
+        y += dy;
+        ring.add_coord(x, y);
+    }
+    assert(feature.geometry(id++) == 15);// close_path
+    ring.add_coord(ring[0].x, ring[0].y);
+    boost::geometry::unique(ring);
+    bool clockwise = mapnik::util::is_clockwise(ring);
+
+    if (false)//clockwise != check)
+    {
+        std::string wkt;
+        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string>(ring));
+        std::cerr << wkt << std::endl;
+    }
+    return (clockwise == check);
 }
 
 inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
@@ -291,10 +352,11 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
     unsigned exterior_id = current_feature.geometry_size();
     // exterior ring
     encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier);
+
     // check winding order
-    if (!is_clockwise(current_feature, exterior_id))
+    if (!check_ring(current_feature, exterior_id, false))
     {
-        std::cerr << "FAIL" << std::endl;
+        std::cerr << "FAIL exterior" << std::endl;
     }
     // interior rings
     for (auto const& ring : poly.interior_rings)
@@ -304,10 +366,10 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
             unsigned ring_id = current_feature.geometry_size();
             encode_ring(ring, current_feature, x_, y_, path_multiplier);
             // check winding order
-            //if (is_clockwise(current_feature, ring_id))
-            //{
-            //    std::cerr << "FAIL" << std::endl;
-            //}
+            if (check_ring(current_feature, ring_id, true))
+            {
+                std::cerr << "FAIL interior" << std::endl;
+            }
         }
     }
     return 1; // FIXME
