@@ -29,9 +29,6 @@
 #include <mapnik/geometry_envelope.hpp>
 #include <mapnik/geometry_adapters.hpp>
 #include <mapnik/util/is_clockwise.hpp>
-#include <mapnik/util/geometry_to_wkt.hpp>
-//#include <mapnik/simplify.hpp>
-//#include <mapnik/simplify_converter.hpp>
 #include <mapnik/geometry_correct.hpp>
 #include <boost/geometry/algorithms/unique.hpp>
 
@@ -61,6 +58,7 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "vector_tile.pb.h"
 #pragma GCC diagnostic pop
+#include "vector_tile_geometry_util.hpp"
 
 namespace mapnik { namespace vector_tile_impl {
 
@@ -80,7 +78,11 @@ struct coord_transformer
         calc_type x = boost::geometry::get<0>(p1);
         calc_type y = boost::geometry::get<1>(p1);
         calc_type z = 0.0;
-        if (!prj_trans_.backward(x, y, z)) return false;
+        if (!prj_trans_.backward(x, y, z))
+        {
+            std::clog << "pj_transform failed\n";
+            return false;
+        }
         tr_.forward(&x,&y);
         boost::geometry::set<0>(p2, boost::numeric_cast<coordinate_type>(x));
         boost::geometry::set<1>(p2, boost::numeric_cast<coordinate_type>(y));
@@ -875,7 +877,6 @@ void processor<T>::apply_to_layer(mapnik::layer const& lay,
             }
             if (geom.is<mapnik::geometry::geometry_collection>())
             {
-                std::clog << "collection\n";
                 auto const& collection = mapnik::util::get<mapnik::geometry::geometry_collection>(geom);
                 for (auto const& part : collection)
                 {
@@ -918,7 +919,8 @@ struct encoder_visitor {
       prj_trans_(prj_trans),
       buffered_query_ext_(buffered_query_ext),
       t_(t),
-      tolerance_(tolerance) {}
+      tolerance_(tolerance),
+      clipper_multiplier_(1000000.0) {}
 
     unsigned operator() (mapnik::geometry::point const& geom)
     {
@@ -1030,101 +1032,37 @@ struct encoder_visitor {
         {
             if (geom.exterior_ring.size() > 3)
             {
-                using va_type = mapnik::geometry::polygon_vertex_adapter;
-                double mult = 1000000.0;
-                ClipperLib::Clipper clipper;
-                std::vector<ClipperLib::IntPoint> path;
-                //path.reserve(geom.exterior_ring.size());
-                for (auto const& pt : geom.exterior_ring)
-                {
-                    double x = static_cast<ClipperLib::cInt>(pt.x*mult);
-                    double y = static_cast<ClipperLib::cInt>(pt.y*mult);
-                    path.emplace_back(x,y);
-                }
-                if (!clipper.AddPath(path, ClipperLib::ptSubject, true))
-                {
-                    std::clog << "ptSubject ext failed " << path.size() << "\n";
-                    return 0;
-                }
-                for (auto const& ring : geom.interior_rings)
-                {
-                    if (ring.size() < 4) continue;
-                    path.clear();
-                    for (auto const& pt : ring)
-                    {
-                        double x = static_cast<ClipperLib::cInt>(pt.x*mult);
-                        double y = static_cast<ClipperLib::cInt>(pt.y*mult);
-                        path.emplace_back(x,y);
-                    }
-                    if (!clipper.AddPath(path, ClipperLib::ptSubject, true))
-                    {
-                        std::clog << "ptSubject hole failed! " << path.size() << " " << ring.size() << "\n";
-                    }
-                }
-                ClipperLib::PolyTree polygons;
-                //clipper.Execute(ClipperLib::ctUnion, polygons, ClipperLib::pftNonZero);
-                //std::cerr << "path size=" << path.size() << std::endl;
-                std::vector<ClipperLib::IntPoint> clip_box;
-                clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.minx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.miny()*mult));
-                clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.maxx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.miny()*mult));
-                clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.maxx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.maxy()*mult));
-                clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.minx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.maxy()*mult));
-                clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.minx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.miny()*mult));
-
-                if (!clipper.AddPath( clip_box, ClipperLib::ptClip, true ))
-                {
-                    std::clog << "ptClip failed!\n";
-                    return 0;
-                }
-
                 backend_.start_tile_feature(feature_);
                 backend_.current_feature_->set_type(vector_tile::Tile_GeomType_POLYGON);
-
-                clipper.Execute(ClipperLib::ctIntersection, polygons, ClipperLib::pftNonZero, ClipperLib::pftNonZero);
-                clipper.Clear();
-                ClipperLib::PolyNode* polynode = polygons.GetFirst();
-                mapnik::geometry::multi_polygon mp;
-                mp.emplace_back();
-                bool first = true;
-
-                while (polynode)
+                ClipperLib::Clipper clipper;
+                add_geom_to_clipper(clipper,geom,buffered_query_ext_,clipper_multiplier_);
+                if (add_clipbox_to_clipper(clipper,buffered_query_ext_,clipper_multiplier_))
                 {
-                    if (!polynode->IsHole())
+                    mapnik::geometry::multi_polygon mp;
+                    apply_clipper(clipper,mp,clipper_multiplier_);
+                    for (auto const& clipped_poly : mp)
                     {
-                        if (first) first = false;
-                        else mp.emplace_back(); // start new polygon
-                        for (auto const& pt : polynode->Contour)
+                        mapnik::box2d<double> bbox = mapnik::geometry::envelope(clipped_poly);
+                        if (clipped_poly.exterior_ring.size() > 3 && buffered_query_ext_.intersects(bbox))
                         {
-                            mp.back().exterior_ring.add_coord(pt.X/mult, pt.Y/mult);
+                            coord_transformer<double> transformer(t_, prj_trans_);
+                            mapnik::geometry::polygon transformed_poly;
+                            boost::geometry::transform(clipped_poly, transformed_poly, transformer);
+                            correct_winding_order(transformed_poly);
+                            path_count += backend_.add_path(transformed_poly, 0);
                         }
-                        // children of exterior ring are always interior rings
-                        for (auto const* ring : polynode->Childs)
+                        else
                         {
-                            mapnik::geometry::linear_ring hole;
-                            for (auto const& pt : ring->Contour)
-                            {
-                                hole.add_coord(pt.X/mult, pt.Y/mult);
-                            }
-                            mp.back().add_hole(std::move(hole));
+                            //std::clog << "after clipping, polygon with less than 4 points encountered\n";
                         }
                     }
-                    polynode = polynode->GetNext();
                 }
-                mapnik::geometry::correct(mp);
-
-                for (auto const& poly : mp)
-                {
-                    mapnik::box2d<double> bbox = mapnik::geometry::envelope(poly);
-                    if (poly.exterior_ring.size() > 3 && buffered_query_ext_.intersects(bbox))
-                    {
-                        va_type va(poly);
-                        using path_type = mapnik::transform_path_adapter<mapnik::view_transform,va_type>;
-                        path_type path(t_, va, prj_trans_);
-                        path_count += backend_.add_path(path, tolerance_);
-                    }
-                }
+                backend_.stop_tile_feature();
             }
-            backend_.stop_tile_feature();
+            else
+            {
+                //std::clog << "polygon with less than 4 points encountered\n";
+            }
             return path_count;
         }
         return path_count;
@@ -1138,105 +1076,30 @@ struct encoder_visitor {
         {
             backend_.start_tile_feature(feature_);
             backend_.current_feature_->set_type(vector_tile::Tile_GeomType_POLYGON);
-            using va_type = mapnik::geometry::polygon_vertex_adapter;
-            double mult = 1000000.0;
             ClipperLib::Clipper clipper;
             for (auto const& poly : geom)
             {
-                mapnik::box2d<double> bbox = mapnik::geometry::envelope(poly);
-                if (poly.exterior_ring.size() > 3 && buffered_query_ext_.intersects(bbox))
+                add_geom_to_clipper(clipper,poly,buffered_query_ext_,clipper_multiplier_);
+            }
+            if (add_clipbox_to_clipper(clipper,buffered_query_ext_,clipper_multiplier_))
+            {
+                mapnik::geometry::multi_polygon mp;
+                apply_clipper(clipper,mp,clipper_multiplier_);
+                for (auto const& clipped_poly : mp)
                 {
-                    std::vector<ClipperLib::IntPoint> path;
-                    //path.reserve(poly.exterior_ring.size());
-                    for (auto const& pt : poly.exterior_ring)
+                    mapnik::box2d<double> bbox = mapnik::geometry::envelope(clipped_poly);
+                    if (clipped_poly.exterior_ring.size() > 3 && buffered_query_ext_.intersects(bbox))
                     {
-                        double x = static_cast<ClipperLib::cInt>(pt.x*mult);
-                        double y = static_cast<ClipperLib::cInt>(pt.y*mult);
-                        path.emplace_back(x,y);
-                    }
-                    if (!clipper.AddPath(path, ClipperLib::ptSubject, true))
-                    {
-                        std::clog << "ptSubject ext failed " << path.size() << "\n";
-                        continue;
-                    }
-                    for (auto const& ring : poly.interior_rings)
-                    {
-                        if (ring.size() < 4) continue;
-                        path.clear();
-                        for (auto const& pt : ring)
-                        {
-                            double x = static_cast<ClipperLib::cInt>(pt.x*mult);
-                            double y = static_cast<ClipperLib::cInt>(pt.y*mult);
-                            path.emplace_back(x,y);
-                        }
-                        if (!clipper.AddPath(path, ClipperLib::ptSubject, true))
-                        {
-                            std::clog << "ptSubject hole failed! " << path.size() << " " << ring.size() << "\n";
-                        }
+                        coord_transformer<double> transformer(t_, prj_trans_);
+                        mapnik::geometry::polygon transformed_poly;
+                        boost::geometry::transform(clipped_poly, transformed_poly, transformer);
+                        correct_winding_order(transformed_poly);
+                        path_count += backend_.add_path(transformed_poly, 0);
                     }
                 }
             }
-            ClipperLib::PolyTree polygons;
-            //clipper.Execute(ClipperLib::ctUnion, polygons, ClipperLib::pftNonZero);
-            //std::cerr << "path size=" << path.size() << std::endl;
-            std::vector<ClipperLib::IntPoint> clip_box;
-            clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.minx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.miny()*mult));
-            clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.maxx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.miny()*mult));
-            clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.maxx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.maxy()*mult));
-            clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.minx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.maxy()*mult));
-            clip_box.emplace_back(static_cast<ClipperLib::cInt>(buffered_query_ext_.minx()*mult),static_cast<ClipperLib::cInt>(buffered_query_ext_.miny()*mult));
-
-            if (!clipper.AddPath( clip_box, ClipperLib::ptClip, true ))
-            {
-                std::clog << "ptClip failed!\n";
-            }
-
-            clipper.Execute(ClipperLib::ctIntersection, polygons, ClipperLib::pftNonZero, ClipperLib::pftNonZero);
-            clipper.Clear();
-            ClipperLib::PolyNode* polynode = polygons.GetFirst();
-            mapnik::geometry::multi_polygon mp;
-            mp.emplace_back();
-            bool first = true;
-
-            while (polynode)
-            {
-                if (!polynode->IsHole())
-                {
-                    if (first) first = false;
-                    else mp.emplace_back(); // start new polygon
-                    for (auto const& pt : polynode->Contour)
-                    {
-                        mp.back().exterior_ring.add_coord(pt.X/mult, pt.Y/mult);
-                    }
-                    // children of exterior ring are always interior rings
-                    for (auto const* ring : polynode->Childs)
-                    {
-                        mapnik::geometry::linear_ring hole;
-                        for (auto const& pt : ring->Contour)
-                        {
-                            hole.add_coord(pt.X/mult, pt.Y/mult);
-                        }
-                        mp.back().add_hole(std::move(hole));
-                    }
-                }
-                polynode = polynode->GetNext();
-            }
-            mapnik::geometry::correct(mp);
-
-            for (auto const& poly : mp)
-            {
-                mapnik::box2d<double> bbox = mapnik::geometry::envelope(poly);
-                if (poly.exterior_ring.size() > 3 && buffered_query_ext_.intersects(bbox))
-                {
-                    coord_transformer<double> transformer(t_, prj_trans_);
-                    mapnik::geometry::polygon transformed_poly;
-                    boost::geometry::transform(poly, transformed_poly, transformer);
-                    correct_winding_order(transformed_poly);
-                    path_count += backend_.add_path(transformed_poly, 0);
-                }
-            }
+            backend_.stop_tile_feature();
         }
-        backend_.stop_tile_feature();
         return path_count;
     }
 
@@ -1251,6 +1114,7 @@ struct encoder_visitor {
     mapnik::box2d<double> const& buffered_query_ext_;
     mapnik::view_transform const& t_;
     unsigned tolerance_;
+    double clipper_multiplier_;
 };
 
 template <typename T>
