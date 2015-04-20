@@ -257,15 +257,17 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
 
     if (clockwise != mapnik::util::is_clockwise(temp_ring))
     {
+#if 0
         std::string wkt;
         mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string>(temp_ring));
         std::cerr << "WRONG WINDING ring_size="  << temp_ring.size() << std::endl;
         std::cerr << wkt << std::endl << std::endl;
         boost::geometry::reverse(temp_ring);
+#endif
         return false;
     }
 
-#if 1 //
+#if 0 //
     if (!boost::geometry::is_valid(temp_ring))
     {
         std::string wkt;
