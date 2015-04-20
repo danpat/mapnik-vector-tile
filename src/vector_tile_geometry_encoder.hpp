@@ -13,6 +13,7 @@
 #include <sstream>
 #include <iostream>
 #include <cassert>
+#include <boost/range/adaptor/sliced.hpp>
 
 namespace mapnik { namespace vector_tile_impl {
 
@@ -229,70 +230,85 @@ inline unsigned encode_geometry(T & path,
     return count;
 }
 
-using deltas_cont = std::vector<std::tuple<int32_t,int32_t>>;
-
 inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
                         vector_tile::Tile_Feature & current_feature,
                         int32_t & start_x,
                         int32_t & start_y,
-                        unsigned path_multiplier)
+                        unsigned path_multiplier,
+                        bool clockwise)
 {
-    int32_t x0 = start_x;
-    int32_t y0 = start_y;
-    int32_t x = 0;
-    int32_t y = 0;
-    // calculate x/y deltas and discard dupes
-
-    deltas_cont deltas;
-    std::size_t num_deltas = ring.size() - 1;
-    deltas.reserve(num_deltas);
-    for (std::size_t i = 0; i< num_deltas; ++i)
+    mapnik::geometry::linear_ring temp_ring;
+    std::size_t num_points = ring.size();
+    temp_ring.reserve(num_points);
+    for (std::size_t i = 0; i< num_points; ++i)
     {
         auto const& pt = ring[i];
-        // Compute delta to the previous coordinate.
-        x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
-        y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
-        int32_t dx = x - start_x;
-        int32_t dy = y - start_y;
-        if (i > 0 && dx == 0 && dy == 0) continue;
-        deltas.emplace_back(dx, dy);
-        start_x = x;
-        start_y = y;
+        int32_t x = static_cast<int32_t>(std::floor((pt.x * path_multiplier) + 0.5));
+        int32_t y = static_cast<int32_t>(std::floor((pt.y * path_multiplier) + 0.5));
+        temp_ring.emplace_back(x, y);
     }
 
-    if (deltas.size() < 3)
+    boost::geometry::unique(temp_ring);
+    boost::geometry::remove_spikes(temp_ring);
+    if (temp_ring.size() < 4)
     {
-        //restore starting x/y
-        start_x = x0;
-        start_y = y0;
         return false;
     }
-    // encode deltas into VT geometry
-    bool move_to = true;
-    bool line_to = true;
-    const int cmd_bits = 3;
-    int32_t line_to_length = static_cast<int32_t>(deltas.size()) - 1;
 
-    for (auto const& pt : deltas)
+    if (clockwise != mapnik::util::is_clockwise(temp_ring))
     {
-        if (move_to)
+        std::string wkt;
+        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string>(temp_ring));
+        std::cerr << "WRONG WINDING ring_size="  << temp_ring.size() << std::endl;
+        std::cerr << wkt << std::endl << std::endl;
+        boost::geometry::reverse(temp_ring);
+        return false;
+    }
+
+#if 1 //
+    if (!boost::geometry::is_valid(temp_ring))
+    {
+        std::string wkt;
+        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string>(temp_ring));
+        std::cerr << "INVALID ring_size="  << temp_ring.size() << std::endl;
+        std::cerr << wkt << std::endl << std::endl;
+        //return false;
+    }
+#endif
+    // encode deltas into VT geometry
+    const int cmd_bits = 3;
+    int32_t line_to_length = static_cast<int32_t>(temp_ring.size()) - 1;
+
+    enum {
+        move_to = 1,
+        line_to = 2,
+        coords = 3
+    } status = move_to;
+
+    for (auto const& pt : temp_ring | boost::adaptors::sliced(0, line_to_length + 1))
+    {
+        if (status == move_to)
         {
-            move_to = false;
-            line_to = true;
+            status = line_to;
             current_feature.add_geometry(9); // 1 | (move_to << 3)
         }
-        else if (line_to)
+        else if (status == line_to)
         {
-            line_to = false;
+            status = coords;
             current_feature.add_geometry((line_to_length << cmd_bits) | 2); // len | (line_to << 3)
         }
-        int32_t dx = std::get<0>(pt);
-        int32_t dy = std::get<1>(pt);
+        int32_t x = static_cast<int32_t>(pt.x);
+        int32_t y = static_cast<int32_t>(pt.y);
+        int32_t dx = x - start_x;
+        int32_t dy = y - start_y;
+        assert( dx > 0);
+        assert( dy > 0);
         // Manual zigzag encoding.
         current_feature.add_geometry((dx << 1) ^ (dx >> 31));
         current_feature.add_geometry((dy << 1) ^ (dy >> 31));
+        start_x = x;
+        start_y = y;
     }
-
     current_feature.add_geometry(15); // close_path
     return true;
 }
@@ -326,15 +342,8 @@ inline bool check_ring( vector_tile::Tile_Feature const& feature, unsigned id, b
     }
     assert(feature.geometry(id++) == 15);// close_path
     ring.add_coord(ring[0].x, ring[0].y);
-    boost::geometry::unique(ring);
+    //boost::geometry::unique(ring);
     bool clockwise = mapnik::util::is_clockwise(ring);
-
-    if (false)//clockwise != check)
-    {
-        std::string wkt;
-        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string>(ring));
-        std::cerr << wkt << std::endl;
-    }
     return (clockwise == check);
 }
 
@@ -345,13 +354,12 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
                                 unsigned tolerance,
                                 unsigned path_multiplier)
 {
-
     unsigned exterior_id = current_feature.geometry_size();
     // exterior ring
-    if (encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier))
+    if (encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier, true))
     {
         // check winding order
-        if (!check_ring(current_feature, exterior_id, false))
+        if (!check_ring(current_feature, exterior_id, true))
         {
             std::cerr << "FAIL exterior" << std::endl;
         }
@@ -361,10 +369,10 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
             if (ring.size() > 3)
             {
                 unsigned ring_id = current_feature.geometry_size();
-                if (encode_ring(ring, current_feature, x_, y_, path_multiplier))
+                if (encode_ring(ring, current_feature, x_, y_, path_multiplier, false))
                 {
                     // check winding order
-                    if (check_ring(current_feature, ring_id, true))
+                    if (!check_ring(current_feature, ring_id, false))
                     {
                         std::cerr << "FAIL interior" << std::endl;
                     }
