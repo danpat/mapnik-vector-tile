@@ -576,7 +576,9 @@ mapnik::geometry::geometry round_trip(mapnik::geometry::geometry const& geom,
     mapnik::Map map(tile_size,tile_size,"+init=epsg:3857");
     mapnik::request m_req(tile_size,tile_size,bbox);
     renderer_type ren(backend,map,m_req,1,0,0,0);
-    // instead of calling apply, let's cheat and test `handle_geometry` directly by adding features
+    // we want to just test `handle_geometry`, so instead of
+    // calling ren.apply let's construct a layer directly
+    // and pass in a single feature
     backend.start_tile_layer("layer");
     mapnik::context_ptr ctx = std::make_shared<mapnik::context_type>();
     mapnik::feature_ptr feature(mapnik::feature_factory::create(ctx,1));
@@ -737,6 +739,10 @@ TEST_CASE( "vector tile multi_polygon encoding of actual multi_polygon", "should
     geom.emplace_back(std::move(poly2));
     mapnik::geometry::geometry new_geom = round_trip(geom);
     CHECK( !mapnik::geometry::is_empty(new_geom) );
+    std::string geojson_string;
+    CHECK( mapnik::util::to_geojson(geojson_string,new_geom) );
+    INFO( geojson_string );
+    INFO( mapnik::geometry::geometry_type(new_geom) );
     CHECK( new_geom.is<mapnik::geometry::multi_polygon>() );
 }
 
