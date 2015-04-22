@@ -1077,22 +1077,9 @@ struct encoder_visitor {
         {
             backend_.start_tile_feature(feature_);
             backend_.current_feature_->set_type(vector_tile::Tile_GeomType_POLYGON);
-
-            const double buffer_distance = 10.0;
-            const int points_per_circle = 8;
-            boost::geometry::strategy::buffer::distance_symmetric<double> distance_strategy(buffer_distance);
-            boost::geometry::strategy::buffer::join_round join_strategy(points_per_circle);
-            boost::geometry::strategy::buffer::end_round end_strategy(points_per_circle);
-            boost::geometry::strategy::buffer::point_circle circle_strategy(points_per_circle);
-            boost::geometry::strategy::buffer::side_straight side_strategy;
-            mapnik::geometry::multi_polygon<double> multi_poly;
-
-            boost::geometry::buffer(geom, multi_poly, distance_strategy, side_strategy,
-                                    join_strategy, end_strategy, circle_strategy);
-
             ClipperLib::Clipper clipper;
             //clipper.StrictlySimple(true);
-            for (auto const& poly : multi_poly)
+            for (auto const& poly : geom)
             {
                 add_geom_to_clipper(clipper,poly,buffered_query_ext_,clipper_multiplier_);
             }
