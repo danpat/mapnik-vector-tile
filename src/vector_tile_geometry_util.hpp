@@ -4,7 +4,7 @@
 namespace mapnik { namespace vector_tile_impl {
 
 inline void apply_clipper(ClipperLib::Clipper & clipper,
-                          mapnik::geometry::multi_polygon & geom,
+                          mapnik::geometry::multi_polygon<double> & geom,
                           double clipper_multiplier)
 {
     ClipperLib::PolyTree polygons;
@@ -21,15 +21,15 @@ inline void apply_clipper(ClipperLib::Clipper & clipper,
             else geom.emplace_back(); // start new polygon
             for (auto const& pt : polynode->Contour)
             {
-                geom.back().exterior_ring.add_coord(pt.X/clipper_multiplier, pt.Y/clipper_multiplier);
+                geom.back().exterior_ring.add_coord(pt.x/clipper_multiplier, pt.y/clipper_multiplier);
             }
             // children of exterior ring are always interior rings
             for (auto const* ring : polynode->Childs)
             {
-                mapnik::geometry::linear_ring hole;
+                mapnik::geometry::linear_ring<double> hole;
                 for (auto const& pt : ring->Contour)
                 {
-                    hole.add_coord(pt.X/clipper_multiplier, pt.Y/clipper_multiplier);
+                    hole.add_coord(pt.x/clipper_multiplier, pt.y/clipper_multiplier);
                 }
                 geom.back().add_hole(std::move(hole));
             }
@@ -37,14 +37,14 @@ inline void apply_clipper(ClipperLib::Clipper & clipper,
         polynode = polynode->GetNext();
     }
     // assert here instead of fix
-    mapnik::geometry::correct(geom);    
+    mapnik::geometry::correct(geom);
 }
 
 inline bool add_clipbox_to_clipper(ClipperLib::Clipper & clipper,
                            mapnik::box2d<double> const& bbox,
                            double clipper_multiplier)
 {
-    std::vector<ClipperLib::IntPoint> clip_box;
+    mapnik::geometry::line_string<int64_t> clip_box;
     clip_box.emplace_back(static_cast<ClipperLib::cInt>(bbox.minx()*clipper_multiplier),
           static_cast<ClipperLib::cInt>(bbox.miny()*clipper_multiplier));
     clip_box.emplace_back(static_cast<ClipperLib::cInt>(bbox.maxx()*clipper_multiplier),
@@ -64,14 +64,14 @@ inline bool add_clipbox_to_clipper(ClipperLib::Clipper & clipper,
 }
 
 inline void add_geom_to_clipper(ClipperLib::Clipper & clipper,
-                           mapnik::geometry::polygon const& poly,
-                           mapnik::box2d<double> const& bbox,
-                           double clipper_multiplier)
+                                mapnik::geometry::polygon<double> const& poly,
+                                mapnik::box2d<double> const& bbox,
+                                double clipper_multiplier)
 {
     mapnik::box2d<double> extent = mapnik::geometry::envelope(poly);
     if (poly.exterior_ring.size() > 3 && bbox.intersects(extent))
     {
-        std::vector<ClipperLib::IntPoint> path;
+        mapnik::geometry::line_string<int64_t> path;
         path.reserve(poly.exterior_ring.size());
         for (auto const& pt : poly.exterior_ring)
         {
@@ -107,7 +107,7 @@ inline void add_geom_to_clipper(ClipperLib::Clipper & clipper,
     }
     else
     {
-        //std::clog << "when adding to clipper, polygon with less than 4 points encountered\n";        
+        //std::clog << "when adding to clipper, polygon with less than 4 points encountered\n";
     }
 }
 

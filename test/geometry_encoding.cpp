@@ -16,7 +16,7 @@ low level encoding and decoding that skips clipping
 */
 
 TEST_CASE( "point", "should round trip without changes" ) {
-    mapnik::geometry::point g(0,0);
+    mapnik::geometry::point<double> g(0,0);
     std::string expected(
     "move_to(0,0)\n"
     );
@@ -24,7 +24,7 @@ TEST_CASE( "point", "should round trip without changes" ) {
 }
 
 TEST_CASE( "multi_point", "should round trip without changes" ) {
-    mapnik::geometry::multi_point g;
+    mapnik::geometry::multi_point<double> g;
     g.add_coord(0,0);
     g.add_coord(1,1);
     g.add_coord(2,2);
@@ -37,7 +37,7 @@ TEST_CASE( "multi_point", "should round trip without changes" ) {
 }
 
 TEST_CASE( "line_string", "should round trip without changes" ) {
-    mapnik::geometry::line_string g;
+    mapnik::geometry::line_string<double> g;
     g.add_coord(0,0);
     g.add_coord(1,1);
     g.add_coord(100,100);
@@ -50,16 +50,16 @@ TEST_CASE( "line_string", "should round trip without changes" ) {
 }
 
 TEST_CASE( "multi_line_string", "should round trip without changes" ) {
-    mapnik::geometry::multi_line_string g;
+    mapnik::geometry::multi_line_string<double> g;
     {
-        mapnik::geometry::line_string line;
+        mapnik::geometry::line_string<double> line;
         line.add_coord(0,0);
         line.add_coord(1,1);
         line.add_coord(100,100);
         g.emplace_back(std::move(line));
     }
     {
-        mapnik::geometry::line_string line;
+        mapnik::geometry::line_string<double> line;
         line.add_coord(-10,-10);
         line.add_coord(-20,-20);
         line.add_coord(-100,-100);
@@ -77,7 +77,7 @@ TEST_CASE( "multi_line_string", "should round trip without changes" ) {
 }
 
 TEST_CASE( "degenerate line_string", "should be culled" ) {
-    mapnik::geometry::line_string line;
+    mapnik::geometry::line_string<double> line;
     line.add_coord(10,10);
 
     std::string wkt0;
@@ -93,11 +93,11 @@ TEST_CASE( "degenerate line_string", "should be culled" ) {
 }
 
 TEST_CASE( "multi_line_string with degenerate first part", "should be culled" ) {
-    mapnik::geometry::multi_line_string g;
-    mapnik::geometry::line_string l1;
+    mapnik::geometry::multi_line_string<double> g;
+    mapnik::geometry::line_string<double> l1;
     l1.add_coord(0,0);
     g.push_back(std::move(l1));
-    mapnik::geometry::line_string l2;
+    mapnik::geometry::line_string<double> l2;
     l2.add_coord(2,2);
     l2.add_coord(3,3);
     g.push_back(std::move(l2));
@@ -115,20 +115,20 @@ TEST_CASE( "multi_line_string with degenerate first part", "should be culled" ) 
     wkt0.clear();
     CHECK( mapnik::util::to_wkt(wkt0,geom) );
     CHECK( wkt0 == "LINESTRING(2 2,3 3)");
-    CHECK( geom.is<mapnik::geometry::line_string>() );
+    CHECK( geom.is<mapnik::geometry::line_string<double>>() );
 }
 
 TEST_CASE( "multi_line_string with degenerate second part", "should be culled" ) {
-    mapnik::geometry::multi_line_string g;
+    mapnik::geometry::multi_line_string<double> g;
     {
-        mapnik::geometry::line_string line;
+        mapnik::geometry::line_string<double> line;
         line.add_coord(0,0);
         line.add_coord(1,1);
         line.add_coord(100,100);
         g.emplace_back(std::move(line));
     }
     {
-        mapnik::geometry::line_string line;
+        mapnik::geometry::line_string<double> line;
         line.add_coord(-10,-10);
         g.emplace_back(std::move(line));
     }
@@ -147,11 +147,11 @@ TEST_CASE( "multi_line_string with degenerate second part", "should be culled" )
     wkt0.clear();
     CHECK( mapnik::util::to_wkt(wkt0,geom) );
     CHECK( wkt0 == "LINESTRING(0 0,1 1,100 100)");
-    CHECK( geom.is<mapnik::geometry::line_string>() );
+    CHECK( geom.is<mapnik::geometry::line_string<double>>() );
 }
 
 TEST_CASE( "polygon", "should round trip without changes" ) {
-    mapnik::geometry::polygon g;
+    mapnik::geometry::polygon<double> g;
     g.exterior_ring.add_coord(0,0);
     g.exterior_ring.add_coord(1,1);
     g.exterior_ring.add_coord(100,100);
@@ -166,7 +166,7 @@ TEST_CASE( "polygon", "should round trip without changes" ) {
 }
 
 TEST_CASE( "polygon with degenerate exterior ring ", "should be culled" ) {
-    mapnik::geometry::polygon p0;
+    mapnik::geometry::polygon<double> p0;
     // invalid exterior ring
     p0.exterior_ring.add_coord(0,0);
     p0.exterior_ring.add_coord(0,10);
@@ -184,12 +184,12 @@ TEST_CASE( "polygon with degenerate exterior ring ", "should be culled" ) {
 }
 
 TEST_CASE( "polygon with degenerate exterior ring will drop valid interior ring", "should be culled" ) {
-    mapnik::geometry::polygon p0;
+    mapnik::geometry::polygon<double> p0;
     // invalid exterior ring
     p0.exterior_ring.add_coord(0,0);
     p0.exterior_ring.add_coord(0,10);
     // valid interior ring
-    mapnik::geometry::linear_ring hole;
+    mapnik::geometry::linear_ring<double> hole;
     hole.add_coord(-7,7);
     hole.add_coord(-3,7);
     hole.add_coord(-3,3);
@@ -210,14 +210,14 @@ TEST_CASE( "polygon with degenerate exterior ring will drop valid interior ring"
 }
 
 TEST_CASE( "polygon with valid exterior ring but degenerate interior ring", "should be culled" ) {
-    mapnik::geometry::polygon p0;
+    mapnik::geometry::polygon<double> p0;
     p0.exterior_ring.add_coord(0,0);
     p0.exterior_ring.add_coord(0,10);
     p0.exterior_ring.add_coord(-10,10);
     p0.exterior_ring.add_coord(-10,0);
     p0.exterior_ring.add_coord(0,0);
     // invalid interior ring
-    mapnik::geometry::linear_ring hole;
+    mapnik::geometry::linear_ring<double> hole;
     hole.add_coord(-7,7);
     hole.add_coord(-3,7);
     p0.add_hole(std::move(hole));
@@ -230,15 +230,15 @@ TEST_CASE( "polygon with valid exterior ring but degenerate interior ring", "sho
 
     vector_tile::Tile_Feature feature = geometry_to_feature(p0);
     auto p1 = mapnik::vector_tile_impl::decode_geometry(feature,0.0,0.0,1.0,1.0);
-    CHECK( p1.is<mapnik::geometry::polygon>() );
-    auto const& poly = mapnik::util::get<mapnik::geometry::polygon>(p1);
+    CHECK( p1.is<mapnik::geometry::polygon<double>>() );
+    auto const& poly = mapnik::util::get<mapnik::geometry::polygon<double>>(p1);
     // since interior ring is degenerate it should have been culled when decoded
     auto const& holes = poly.interior_rings;
     CHECK( holes.empty() == true );
 }
 
 TEST_CASE( "polygon with valid exterior ring but one degenerate interior ring of two", "should be culled" ) {
-    mapnik::geometry::polygon p0;
+    mapnik::geometry::polygon<double> p0;
     p0.exterior_ring.add_coord(0,0);
     p0.exterior_ring.add_coord(0,10);
     p0.exterior_ring.add_coord(-10,10);
@@ -246,14 +246,14 @@ TEST_CASE( "polygon with valid exterior ring but one degenerate interior ring of
     p0.exterior_ring.add_coord(0,0);
     // invalid interior ring
     {
-        mapnik::geometry::linear_ring hole;
+        mapnik::geometry::linear_ring<double> hole;
         hole.add_coord(-7,7);
         hole.add_coord(-3,7);
         p0.add_hole(std::move(hole));
     }
     // valid interior ring
     {
-        mapnik::geometry::linear_ring hole_in_hole;
+        mapnik::geometry::linear_ring<double> hole_in_hole;
         hole_in_hole.add_coord(-6,4);
         hole_in_hole.add_coord(-6,6);
         hole_in_hole.add_coord(-4,6);
@@ -270,8 +270,8 @@ TEST_CASE( "polygon with valid exterior ring but one degenerate interior ring of
 
     vector_tile::Tile_Feature feature = geometry_to_feature(p0);
     auto p1 = mapnik::vector_tile_impl::decode_geometry(feature,0.0,0.0,1.0,1.0);
-    CHECK( p1.is<mapnik::geometry::polygon>() );
-    auto const& poly = mapnik::util::get<mapnik::geometry::polygon>(p1);
+    CHECK( p1.is<mapnik::geometry::polygon<double>>() );
+    auto const& poly = mapnik::util::get<mapnik::geometry::polygon<double>>(p1);
     // since first interior ring is degenerate it should have been culled when decoded
     auto const& holes = poly.interior_rings;
     // the second one is kept: somewhat dubious since it is actually a hole in a hole
@@ -282,13 +282,13 @@ TEST_CASE( "polygon with valid exterior ring but one degenerate interior ring of
 TEST_CASE( "(multi)polygon with hole", "should round trip without changes" ) {
     // NOTE: this polygon should have correct winding order:
     // CCW for exterior, CW for interior
-    mapnik::geometry::polygon p0;
+    mapnik::geometry::polygon<double> p0;
     p0.exterior_ring.add_coord(0,0);
     p0.exterior_ring.add_coord(0,10);
     p0.exterior_ring.add_coord(-10,10);
     p0.exterior_ring.add_coord(-10,0);
     p0.exterior_ring.add_coord(0,0);
-    mapnik::geometry::linear_ring hole;
+    mapnik::geometry::linear_ring<double> hole;
     hole.add_coord(-7,7);
     hole.add_coord(-3,7);
     hole.add_coord(-3,3);
@@ -311,7 +311,7 @@ TEST_CASE( "(multi)polygon with hole", "should round trip without changes" ) {
 
     vector_tile::Tile_Feature feature = geometry_to_feature(p0);
     auto p1 = mapnik::vector_tile_impl::decode_geometry(feature,0.0,0.0,1.0,1.0);
-    CHECK( p1.is<mapnik::geometry::polygon>() );
+    CHECK( p1.is<mapnik::geometry::polygon<double>>() );
     CHECK( extent == mapnik::geometry::envelope(p1) );
 
     wkt0.clear();
@@ -325,7 +325,7 @@ TEST_CASE( "(multi)polygon with hole", "should round trip without changes" ) {
     auto _p1 = mapnik::vector_tile_impl::decode_geometry(feature,0.0,0.0,1.0,1.0,true);
     wkt0.clear();
     CHECK( mapnik::util::to_wkt(wkt0,_p1) );
-    CHECK( _p1.is<mapnik::geometry::multi_polygon>() );
+    CHECK( _p1.is<mapnik::geometry::multi_polygon<double>>() );
     std::string expected_wkt2("MULTIPOLYGON(((0 0,0 10,-10 10,-10 0,0 0)),((-7 7,-7 3,-3 3,-3 7,-7 7)))");
     CHECK( wkt0 ==  expected_wkt2 );
     mapnik::geometry::correct(_p1);
@@ -364,9 +364,9 @@ TEST_CASE( "(multi)polygon with hole", "should round trip without changes" ) {
     CHECK(decode_to_path_string(_p1) == expected_p1);
 
     // make into multi_polygon
-    mapnik::geometry::multi_polygon multi_poly;
+    mapnik::geometry::multi_polygon<double> multi_poly;
     multi_poly.push_back(std::move(p0));
-    mapnik::geometry::polygon p2;
+    mapnik::geometry::polygon<double> p2;
     p2.exterior_ring.add_coord(-6,4);
     p2.exterior_ring.add_coord(-4,4);
     p2.exterior_ring.add_coord(-4,6);
@@ -378,7 +378,7 @@ TEST_CASE( "(multi)polygon with hole", "should round trip without changes" ) {
 
     vector_tile::Tile_Feature feature1 = geometry_to_feature(multi_poly);
     auto mp = mapnik::vector_tile_impl::decode_geometry(feature1,0.0,0.0,1.0,1.0);
-    CHECK( mp.is<mapnik::geometry::multi_polygon>() );
+    CHECK( mp.is<mapnik::geometry::multi_polygon<double>>() );
 
     CHECK( multi_extent == mapnik::geometry::envelope(mp) );
 
@@ -408,7 +408,7 @@ TEST_CASE( "(multi)polygon with hole", "should round trip without changes" ) {
 }
 
 TEST_CASE( "test 2", "should drop coincident line_to commands" ) {
-    mapnik::geometry::line_string g;
+    mapnik::geometry::line_string<double> g;
     g.add_coord(0,0);
     g.add_coord(3,3);
     g.add_coord(3,3);
@@ -424,7 +424,7 @@ TEST_CASE( "test 2", "should drop coincident line_to commands" ) {
 }
 
 TEST_CASE( "test 2b", "should drop vertices" ) {
-    mapnik::geometry::line_string g;
+    mapnik::geometry::line_string<double> g;
     g.add_coord(0,0);
     g.add_coord(0,0);
     g.add_coord(1,1);
@@ -437,12 +437,12 @@ TEST_CASE( "test 2b", "should drop vertices" ) {
 }
 
 TEST_CASE( "test 3", "should not drop first move_to or last vertex in line" ) {
-    mapnik::geometry::multi_line_string g;
-    mapnik::geometry::line_string l1;
+    mapnik::geometry::multi_line_string<double> g;
+    mapnik::geometry::line_string<double> l1;
     l1.add_coord(0,0);
     l1.add_coord(1,1);
     g.push_back(std::move(l1));
-    mapnik::geometry::line_string l2;
+    mapnik::geometry::line_string<double> l2;
     l2.add_coord(2,2);
     l2.add_coord(3,3);
     g.push_back(std::move(l2));

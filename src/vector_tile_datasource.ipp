@@ -191,7 +191,7 @@ namespace mapnik { namespace vector_tile_impl {
                 {
                     continue;
                 }
-                mapnik::geometry::geometry geom = decode_geometry(f,tile_x_,tile_y_,scale_,-1*scale_);
+                mapnik::geometry::geometry<double> geom = decode_geometry(f,tile_x_,tile_y_,scale_,-1*scale_);
                 if (geom.is<mapnik::geometry::geometry_empty>())
                 {
                     continue;
@@ -201,9 +201,9 @@ namespace mapnik { namespace vector_tile_impl {
                 {
                     /*
                     std::cout << envelope.to_string() << std::endl;
-                    if (geom.is<mapnik::geometry::multi_polygon>())
+                    if (geom.is<mapnik::geometry::multi_polygon<double>>())
                     {
-                        mapnik::geometry::multi_polygon mp = mapnik::util::get<mapnik::geometry::multi_polygon>(geom);
+                        mapnik::geometry::multi_polygon<double> mp = mapnik::util::get<mapnik::geometry::multi_polygon<double>>(geom);
                         double max_x = -1e10;
                         double max_y = -1e10;
                         double min_x = 1e10;

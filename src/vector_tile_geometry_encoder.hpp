@@ -230,14 +230,14 @@ inline unsigned encode_geometry(T & path,
     return count;
 }
 
-inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
+inline bool encode_ring(mapnik::geometry::linear_ring<double> const& ring,
                         vector_tile::Tile_Feature & current_feature,
                         int32_t & start_x,
                         int32_t & start_y,
                         unsigned path_multiplier,
                         bool clockwise)
 {
-    mapnik::geometry::linear_ring temp_ring;
+    mapnik::geometry::linear_ring<double> temp_ring;
     std::size_t num_points = ring.size();
     temp_ring.reserve(num_points);
     for (std::size_t i = 0; i< num_points; ++i)
@@ -249,17 +249,16 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
     }
 
     boost::geometry::unique(temp_ring);
-    boost::geometry::remove_spikes(temp_ring);
+    //boost::geometry::remove_spikes(temp_ring);
     if (temp_ring.size() < 4)
     {
         return false;
     }
-
     if (clockwise != mapnik::util::is_clockwise(temp_ring))
     {
 #if 0
         std::string wkt;
-        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string>(temp_ring));
+        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string<double>>(temp_ring));
         std::cerr << "WRONG WINDING ring_size="  << temp_ring.size() << std::endl;
         std::cerr << wkt << std::endl << std::endl;
         boost::geometry::reverse(temp_ring);
@@ -267,12 +266,13 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
         return false;
     }
 
-#if 0 //
-    if (!boost::geometry::is_valid(temp_ring))
+#if 1 //
+    mapnik::geometry::line_string<double> const& line = static_cast<mapnik::geometry::line_string<double> const&>(temp_ring);
+    if (!boost::geometry::is_simple(line))
     {
         std::string wkt;
-        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string>(temp_ring));
-        std::cerr << "INVALID ring_size="  << temp_ring.size() << std::endl;
+        mapnik::util::to_wkt(wkt, line);
+        //std::cerr << "INVALID ring_size="  << temp_ring.size() << std::endl;
         std::cerr << wkt << std::endl << std::endl;
         //return false;
     }
@@ -317,7 +317,7 @@ inline bool encode_ring(mapnik::geometry::linear_ring const& ring,
 
 inline bool check_ring( vector_tile::Tile_Feature const& feature, unsigned id, bool check)
 {
-    mapnik::geometry::linear_ring ring;
+    mapnik::geometry::linear_ring<double> ring;
     double x = 0;
     double y = 0;
     uint32_t geom = static_cast<uint32_t>(feature.geometry(id++));
@@ -349,7 +349,7 @@ inline bool check_ring( vector_tile::Tile_Feature const& feature, unsigned id, b
     return (clockwise == check);
 }
 
-inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
+inline unsigned encode_geometry(mapnik::geometry::polygon<double> & poly,
                                 vector_tile::Tile_Feature & current_feature,
                                 int32_t & x_,
                                 int32_t & y_,
@@ -366,6 +366,7 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
             std::cerr << "FAIL exterior" << std::endl;
         }
         // interior rings
+#if 1
         for (auto const& ring : poly.interior_rings)
         {
             if (ring.size() > 3)
@@ -381,6 +382,7 @@ inline unsigned encode_geometry(mapnik::geometry::polygon & poly,
                 }
             }
         }
+#endif
     }
     return 1; // FIXME
 }
