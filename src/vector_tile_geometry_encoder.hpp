@@ -256,27 +256,10 @@ inline bool encode_ring(mapnik::geometry::linear_ring<double> const& ring,
     }
     if (clockwise != mapnik::util::is_clockwise(temp_ring))
     {
-#if 0
-        std::string wkt;
-        mapnik::util::to_wkt(wkt, static_cast<mapnik::geometry::line_string<double>>(temp_ring));
         std::cerr << "WRONG WINDING ring_size="  << temp_ring.size() << std::endl;
-        std::cerr << wkt << std::endl << std::endl;
         boost::geometry::reverse(temp_ring);
-#endif
-        return false;
     }
 
-#if 1 //
-    mapnik::geometry::line_string<double> const& line = static_cast<mapnik::geometry::line_string<double> const&>(temp_ring);
-    if (!boost::geometry::is_simple(line))
-    {
-        std::string wkt;
-        mapnik::util::to_wkt(wkt, line);
-        //std::cerr << "INVALID ring_size="  << temp_ring.size() << std::endl;
-        std::cerr << wkt << std::endl << std::endl;
-        //return false;
-    }
-#endif
     // encode deltas into VT geometry
     const int cmd_bits = 3;
     int32_t line_to_length = static_cast<int32_t>(temp_ring.size()) - 1;
@@ -360,13 +343,14 @@ inline unsigned encode_geometry(mapnik::geometry::polygon<double> & poly,
     // exterior ring
     if (encode_ring(poly.exterior_ring, current_feature, x_, y_, path_multiplier, true))
     {
+#if 0
         // check winding order
         if (!check_ring(current_feature, exterior_id, true))
         {
             std::cerr << "FAIL exterior" << std::endl;
         }
+#endif
         // interior rings
-#if 1
         for (auto const& ring : poly.interior_rings)
         {
             if (ring.size() > 3)
@@ -374,15 +358,16 @@ inline unsigned encode_geometry(mapnik::geometry::polygon<double> & poly,
                 unsigned ring_id = current_feature.geometry_size();
                 if (encode_ring(ring, current_feature, x_, y_, path_multiplier, false))
                 {
+#if 0
                     // check winding order
                     if (!check_ring(current_feature, ring_id, false))
                     {
                         std::cerr << "FAIL interior" << std::endl;
                     }
+#endif
                 }
             }
         }
-#endif
     }
     return 1; // FIXME
 }
