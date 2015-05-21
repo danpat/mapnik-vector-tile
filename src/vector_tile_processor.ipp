@@ -1242,6 +1242,35 @@ struct simplify_visitor {
     unsigned simplify_distance_;
 };
 
+struct scale_rounding_strategy_floor
+{
+    scale_rounding_strategy_floor(double scale, double offset = 0)
+        : scale_(scale), offset_(offset) {}
+
+    template <typename P1, typename P2>
+    inline bool apply(P1 const & p1, P2 & p2) const
+    {
+        using p2_type = typename boost::geometry::coordinate_type<P2>::type;
+        double x = (boost::geometry::get<0>(p1) * scale_) + offset_;
+        double y = (boost::geometry::get<1>(p1) * scale_) + offset_;
+        boost::geometry::set<0>(p2, static_cast<p2_type>(std::floor(x+.5)));
+        boost::geometry::set<1>(p2, static_cast<p2_type>(std::floor(y+.5)));
+        return true;
+    }
+
+    template <typename P1, typename P2>
+    inline P2 execute(P1 const& p1, bool & status) const
+    {
+        P2 p2;
+        status = apply(p1, p2);
+        return p2;
+    }
+
+private:
+    double scale_;
+    double offset_;
+};
+
 
 template <typename T>
 unsigned processor<T>::handle_geometry(mapnik::feature_impl const& feature,
@@ -1251,10 +1280,10 @@ unsigned processor<T>::handle_geometry(mapnik::feature_impl const& feature,
 {
     mapnik::proj_backward_strategy proj_strat(prj_trans);
     mapnik::view_strategy view_strat(t_);
-    mapnik::geometry::scale_rounding_strategy scale_strat(backend_.get_path_multiplier());
+    scale_rounding_strategy_floor scale_strat(backend_.get_path_multiplier());
     using sg_type = mapnik::geometry::strategy_group<mapnik::proj_backward_strategy, 
                                                      mapnik::view_strategy, 
-                                                     mapnik::geometry::scale_rounding_strategy >;
+                                                     scale_rounding_strategy_floor >;
     sg_type sg(proj_strat, view_strat, scale_strat);
     mapnik::geometry::point<double> p1_min(buffered_query_ext.minx(), buffered_query_ext.miny());
     mapnik::geometry::point<double> p1_max(buffered_query_ext.maxx(), buffered_query_ext.maxy());
