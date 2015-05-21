@@ -1242,91 +1242,36 @@ struct simplify_visitor {
     unsigned simplify_distance_;
 };
 
-struct scale_rounding_strategy_floor
+struct transformer
 {
-    scale_rounding_strategy_floor(double scale, double offset = 0)
-        : scale_(scale), offset_(offset) {}
+    transformer(double scale,
+                proj_transform const& prj_trans,
+                view_transform const& tr)
+        : scale_(scale),
+          prj_trans_(prj_trans),
+          tr_(tr) {}
 
     template <typename P1, typename P2>
     inline bool apply(P1 const & p1, P2 & p2) const
     {
-        using p2_type = typename boost::geometry::coordinate_type<P2>::type;
-        double x = (boost::geometry::get<0>(p1) * scale_) + offset_;
-        double y = (boost::geometry::get<1>(p1) * scale_) + offset_;
-        boost::geometry::set<0>(p2, static_cast<p2_type>(std::floor(x+.5)));
-        boost::geometry::set<1>(p2, static_cast<p2_type>(std::floor(y+.5)));
-        return true;
-    }
-
-    template <typename P1, typename P2>
-    inline P2 execute(P1 const& p1, bool & status) const
-    {
-        P2 p2;
-        status = apply(p1, p2);
-        return p2;
-    }
-
-private:
-    double scale_;
-    double offset_;
-};
-
-struct view_strategy2
-{
-    view_strategy2(view_transform const& tr)
-        : tr_(tr) {}
-
-    template <typename P1, typename P2>
-    inline bool apply(P1 const& p1, P2 & p2) const
-    {
-        using coordinate_type = typename boost::geometry::coordinate_type<P2>::type;
-        double x = boost::geometry::get<0>(p1);
-        double y = boost::geometry::get<1>(p1);
-        tr_.forward(&x,&y);
-        boost::geometry::set<0>(p2, x);
-        boost::geometry::set<1>(p2, y);
-        return true;
-    }
-
-    template <typename P1, typename P2>
-    inline P2 execute(P1 const& p1, bool & status) const
-    {
-        P2 p2;
-        status = apply(p1, p2);
-        return p2;
-    }
-
-    view_transform const& tr_;
-};
-
-struct proj_backward_strategy2
-{
-    proj_backward_strategy2(proj_transform const& prj_trans)
-        : prj_trans_(prj_trans) {}
-
-    template <typename P1, typename P2>
-    inline bool apply(P1 const& p1, P2 & p2) const
-    {
-        using p2_type = typename boost::geometry::coordinate_type<P2>::type;
         double x = boost::geometry::get<0>(p1);
         double y = boost::geometry::get<1>(p1);
         double z = 0.0;
         if (!prj_trans_.backward(x, y, z)) return false;
-        boost::geometry::set<0>(p2, x);
-        boost::geometry::set<1>(p2, y);
+        tr_.forward(&x,&y);
+        x *= scale_;
+        y *= scale_;
+        boost::geometry::set<0>(p2, static_cast<std::int64_t>(std::floor(x+.5)));
+        boost::geometry::set<1>(p2, static_cast<std::int64_t>(std::floor(y+.5)));
         return true;
     }
-    
-    template <typename P1, typename P2>
-    inline P2 execute(P1 const& p1, bool & status) const
-    {
-        P2 p2;
-        status = apply(p1, p2);
-        return p2;
-    }
 
+private:
+    double scale_;
     proj_transform const& prj_trans_;
+    view_transform const& tr_;
 };
+
 
 template <typename T>
 unsigned processor<T>::handle_geometry(mapnik::feature_impl const& feature,
@@ -1334,19 +1279,13 @@ unsigned processor<T>::handle_geometry(mapnik::feature_impl const& feature,
                                        mapnik::proj_transform const& prj_trans,
                                        mapnik::box2d<double> const& buffered_query_ext)
 {
-    proj_backward_strategy2 proj_strat(prj_trans);
-    view_strategy2 view_strat(t_);
-    scale_rounding_strategy_floor scale_strat(backend_.get_path_multiplier());
-    using sg_type = mapnik::geometry::strategy_group<proj_backward_strategy2, 
-                                                     view_strategy2, 
-                                                     scale_rounding_strategy_floor >;
-    sg_type sg(proj_strat, view_strat, scale_strat);
+    transformer trans(backend_.get_path_multiplier(),prj_trans,t_);
     mapnik::geometry::point<double> p1_min(buffered_query_ext.minx(), buffered_query_ext.miny());
     mapnik::geometry::point<double> p1_max(buffered_query_ext.maxx(), buffered_query_ext.maxy());
-    mapnik::geometry::point<std::int64_t> p2_min = mapnik::geometry::transform<std::int64_t>(p1_min, sg);
-    mapnik::geometry::point<std::int64_t> p2_max = mapnik::geometry::transform<std::int64_t>(p1_max, sg);
+    mapnik::geometry::point<std::int64_t> p2_min = mapnik::geometry::transform<std::int64_t>(p1_min, trans);
+    mapnik::geometry::point<std::int64_t> p2_max = mapnik::geometry::transform<std::int64_t>(p1_max, trans);
     box2d<int> bbox(p2_min.x, p2_min.y, p2_max.x, p2_max.y);
-    mapnik::geometry::geometry<std::int64_t> new_geom = mapnik::geometry::transform<std::int64_t>(geom, sg);
+    mapnik::geometry::geometry<std::int64_t> new_geom = mapnik::geometry::transform<std::int64_t>(geom, trans);
     encoder_visitor<T> encoder(backend_,feature,bbox, area_threshold_);
     if (simplify_distance_ > 0)
     {
