@@ -1271,6 +1271,62 @@ private:
     double offset_;
 };
 
+struct view_strategy2
+{
+    view_strategy2(view_transform const& tr)
+        : tr_(tr) {}
+
+    template <typename P1, typename P2>
+    inline bool apply(P1 const& p1, P2 & p2) const
+    {
+        using coordinate_type = typename boost::geometry::coordinate_type<P2>::type;
+        double x = boost::geometry::get<0>(p1);
+        double y = boost::geometry::get<1>(p1);
+        tr_.forward(&x,&y);
+        boost::geometry::set<0>(p2, x);
+        boost::geometry::set<1>(p2, y);
+        return true;
+    }
+
+    template <typename P1, typename P2>
+    inline P2 execute(P1 const& p1, bool & status) const
+    {
+        P2 p2;
+        status = apply(p1, p2);
+        return p2;
+    }
+
+    view_transform const& tr_;
+};
+
+struct proj_backward_strategy2
+{
+    proj_backward_strategy2(proj_transform const& prj_trans)
+        : prj_trans_(prj_trans) {}
+
+    template <typename P1, typename P2>
+    inline bool apply(P1 const& p1, P2 & p2) const
+    {
+        using p2_type = typename boost::geometry::coordinate_type<P2>::type;
+        double x = boost::geometry::get<0>(p1);
+        double y = boost::geometry::get<1>(p1);
+        double z = 0.0;
+        if (!prj_trans_.backward(x, y, z)) return false;
+        boost::geometry::set<0>(p2, x);
+        boost::geometry::set<1>(p2, y);
+        return true;
+    }
+    
+    template <typename P1, typename P2>
+    inline P2 execute(P1 const& p1, bool & status) const
+    {
+        P2 p2;
+        status = apply(p1, p2);
+        return p2;
+    }
+
+    proj_transform const& prj_trans_;
+};
 
 template <typename T>
 unsigned processor<T>::handle_geometry(mapnik::feature_impl const& feature,
@@ -1278,11 +1334,11 @@ unsigned processor<T>::handle_geometry(mapnik::feature_impl const& feature,
                                        mapnik::proj_transform const& prj_trans,
                                        mapnik::box2d<double> const& buffered_query_ext)
 {
-    mapnik::proj_backward_strategy proj_strat(prj_trans);
-    mapnik::view_strategy view_strat(t_);
+    proj_backward_strategy2 proj_strat(prj_trans);
+    view_strategy2 view_strat(t_);
     scale_rounding_strategy_floor scale_strat(backend_.get_path_multiplier());
-    using sg_type = mapnik::geometry::strategy_group<mapnik::proj_backward_strategy, 
-                                                     mapnik::view_strategy, 
+    using sg_type = mapnik::geometry::strategy_group<proj_backward_strategy2, 
+                                                     view_strategy2, 
                                                      scale_rounding_strategy_floor >;
     sg_type sg(proj_strat, view_strat, scale_strat);
     mapnik::geometry::point<double> p1_min(buffered_query_ext.minx(), buffered_query_ext.miny());
