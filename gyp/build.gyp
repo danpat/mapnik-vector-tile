@@ -71,6 +71,10 @@
       "sources": [
         "<!@(find ../src/ -name '*.cpp')"
       ],
+      'include_dirs': [
+        '/Users/danpat/mapbox/mapnik-vector-tile/thirdparty/pbf',
+        '/Users/danpat/mapbox/mapnik-vector-tile/thirdparty/variant'
+      ],
       'defines' : [
         'MAPNIK_VECTOR_TILE_LIBRARY=1'
       ],
@@ -119,7 +123,9 @@
         "<!@(find ../test/ -name '*.cpp')"
       ],
       "include_dirs": [
-        "../src"
+        "../src",
+        '/Users/danpat/mapbox/mapnik-vector-tile/thirdparty/pbf',
+        '/Users/danpat/mapbox/mapnik-vector-tile/thirdparty/variant'
       ]
     },
     {
