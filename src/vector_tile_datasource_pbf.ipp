@@ -34,10 +34,10 @@
 namespace mapnik { namespace vector_tile_impl {
 
     template <typename Filter>
-    class tile_featureset : public Featureset
+    class tile_featureset_pbf : public Featureset
     {
     public:
-        tile_featureset(Filter const& filter,
+        tile_featureset_pbf(Filter const& filter,
                         mapnik::box2d<double> const& tile_extent,
                         mapnik::box2d<double> const& unbuffered_query,
                         std::set<std::string> const& attribute_names,
@@ -75,7 +75,7 @@ namespace mapnik { namespace vector_tile_impl {
             }
         }
 
-        virtual ~tile_featureset() {}
+        virtual ~tile_featureset_pbf() {}
 
         feature_ptr next()
         {
@@ -83,8 +83,11 @@ namespace mapnik { namespace vector_tile_impl {
             {
                 mapbox::util::pbf f = features_.at(itr_);
                 // TODO: auto-increment feature id counter here
-                mapnik::feature_ptr feature = mapnik::feature_factory::create(ctx_,itr_++);
+                mapnik::feature_ptr feature = mapnik::feature_factory::create(ctx_,itr_);
                 mapnik::util::variant<std::string, float, double, int64_t, uint64_t, bool> val;
+
+
+                ++itr_;
                 int tagcount=0;
                 uint32_t key_idx, val_idx;
                 int32_t geometry_type = 0; // vector_tile::Tile_GeomType_UNKNOWN
@@ -96,42 +99,53 @@ namespace mapnik { namespace vector_tile_impl {
                             feature->set_id(f.get_uint64());
                             break;
                         case 2:
-                            if (tagcount % 2 == 0)
                             {
-                                key_idx = f.get_uint32();
-                                ++tagcount;
-                            }
-                            else
-                            {
-                                val_idx = f.get_uint32();
-                                //apply_attribute(feature, tr_, layer_keys_.at(key_idx), layer_values_.at(val_idx));
-                                val = layer_values_.at(val_idx);
-                                if (val.is<std::string>())
-                                {
-                                    feature->put(layer_keys_.at(key_idx), tr_.transcode(val.get<std::string>().data(), val.get<std::string>().length()));
-                                }
-                                else if (val.is<bool>())
-                                {
-                                    feature->put(layer_keys_.at(key_idx), static_cast<mapnik::value_bool>(val.get<bool>()));
-                                }
-                                else if (val.is<int64_t>())
-                                {
-                                    feature->put(layer_keys_.at(key_idx), static_cast<mapnik::value_integer>(val.get<int64_t>()));
-                                }
-                                else if (val.is<uint64_t>())
-                                {
-                                    feature->put(layer_keys_.at(key_idx), static_cast<mapnik::value_integer>(val.get<uint64_t>()));
-                                }
-                                else if (val.is<double>())
-                                {
-                                    feature->put(layer_keys_.at(key_idx), static_cast<mapnik::value_double>(val.get<double>()));
-                                }
-                                else if (val.is<float>())
-                                {
-                                    feature->put(layer_keys_.at(key_idx), static_cast<mapnik::value_double>(val.get<float>()));
-                                }
+                                std::pair< mapbox::util::pbf::const_uint32_iterator, mapbox::util::pbf::const_uint32_iterator > tag_iterator = f.packed_uint32();
 
-                                ++tagcount;
+                                for (mapbox::util::pbf::const_uint32_iterator _i = tag_iterator.first; _i != tag_iterator.second; ++_i)
+                                {
+                                    if (tagcount % 2 == 0)
+                                    {
+                                        key_idx = *_i;
+                                        ++tagcount;
+                                    }
+                                    else
+                                    {
+                                        val_idx = *_i;
+                                        val = layer_values_.at(val_idx);
+                                        std::string name = layer_keys_.at(key_idx);
+                                        if (feature->has_key(name))
+                                        {
+                                            if (val.is<std::string>())
+                                            {
+                                                feature->put(name, tr_.transcode(val.get<std::string>().data(), val.get<std::string>().length()));
+                                            }
+                                            else if (val.is<bool>())
+                                            {
+                                                feature->put(name, static_cast<mapnik::value_bool>(val.get<bool>()));
+                                            }
+                                            else if (val.is<int64_t>())
+                                            {
+                                                feature->put(name, static_cast<mapnik::value_integer>(val.get<int64_t>()));
+                                            }
+                                            else if (val.is<uint64_t>())
+                                            {
+                                                feature->put(name, static_cast<mapnik::value_integer>(val.get<uint64_t>()));
+                                            }
+                                            else if (val.is<double>())
+                                            {
+                                                feature->put(name, static_cast<mapnik::value_double>(val.get<double>()));
+                                            }
+                                            else if (val.is<float>())
+                                            {
+                                                feature->put(name, static_cast<mapnik::value_double>(val.get<float>()));
+                                            } else {
+                                                std::cerr << "  Didn't know the type of the value" << std::endl;
+                                            }
+                                            ++tagcount;
+                                        }
+                                    }
+                                }
                             }
                             break;
                         case 3:
@@ -185,25 +199,27 @@ namespace mapnik { namespace vector_tile_impl {
                                     }
                                 }
                             }
-                            }
+                          }
                             break;
                         case 4:
                             {
-                            mapnik::geometry::geometry<double> geom = decode_geometry_pbf(f, geometry_type, tile_x_,tile_y_,scale_,-1*scale_);
-                            if (geom.is<mapnik::geometry::geometry_empty>())
-                            {
-                                continue;
+                                std::pair< mapbox::util::pbf::const_uint32_iterator, mapbox::util::pbf::const_uint32_iterator > geom_itr = f.packed_uint32();
+                                mapnik::geometry::geometry<double> geom = decode_geometry_pbf(geom_itr, geometry_type, tile_x_,tile_y_,scale_,-1*scale_);
+                                if (geom.is<mapnik::geometry::geometry_empty>())
+                                {
+                                    continue;
+                                }
+                                mapnik::box2d<double> envelope = mapnik::geometry::envelope(geom);
+                                if (!filter_.pass(envelope))
+                                {
+                                    continue;
+                                }
+                                feature->set_geometry(std::move(geom));
+                                return feature;
                             }
-                            mapnik::box2d<double> envelope = mapnik::geometry::envelope(geom);
-                            if (!filter_.pass(envelope))
-                            {
-                                continue;
-                            }
-                            feature->set_geometry(std::move(geom));
-                            return feature;
-                            }
-
+                            break;
                         default:
+                            std::cout << "No handler" << std::endl;
                             break;
 
                     }
@@ -247,7 +263,7 @@ namespace mapnik { namespace vector_tile_impl {
         double resolution = mapnik::EARTH_CIRCUMFERENCE/(1 << z_);
         tile_x_ = -0.5 * mapnik::EARTH_CIRCUMFERENCE + x_ * resolution;
         tile_y_ =  0.5 * mapnik::EARTH_CIRCUMFERENCE - y_ * resolution;
-        scale_ = (static_cast<double>(layer_extent_) / tile_size_) * tile_size_/resolution;
+
 
         mapbox::util::pbf val_msg;
 
@@ -302,6 +318,7 @@ namespace mapnik { namespace vector_tile_impl {
                     break;
             }
         }
+        scale_ = (static_cast<double>(layer_extent_) / tile_size_) * tile_size_/resolution;
     }
 
     tile_datasource_pbf::~tile_datasource_pbf() {}
@@ -314,7 +331,7 @@ namespace mapnik { namespace vector_tile_impl {
     featureset_ptr tile_datasource_pbf::features(query const& q) const
     {
         mapnik::filter_in_box filter(q.get_bbox());
-        return std::make_shared<tile_featureset<mapnik::filter_in_box> >
+        return std::make_shared<tile_featureset_pbf<mapnik::filter_in_box> >
             (filter, get_tile_extent(), q.get_unbuffered_bbox(), q.property_names(), features_, tile_x_, tile_y_, scale_, layer_keys_, layer_values_);
     }
 
@@ -326,7 +343,7 @@ namespace mapnik { namespace vector_tile_impl {
         {
             names.insert(key);
         }
-        return std::make_shared<tile_featureset<filter_at_point> >
+        return std::make_shared<tile_featureset_pbf<filter_at_point> >
             (filter, get_tile_extent(), get_tile_extent(), names, features_, tile_x_, tile_y_, scale_, layer_keys_, layer_values_);
     }
 

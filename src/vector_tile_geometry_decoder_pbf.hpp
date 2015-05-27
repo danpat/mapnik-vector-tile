@@ -11,10 +11,10 @@
 
 namespace mapnik { namespace vector_tile_impl {
 
-class Geometry {
+class GeometryPBF {
 
 public:
-    inline explicit Geometry(mapbox::util::pbf f,
+    inline explicit GeometryPBF(std::pair< mapbox::util::pbf::const_uint32_iterator, mapbox::util::pbf::const_uint32_iterator > geo_iterator,
                              double tile_x, double tile_y,
                              double scale_x, double scale_y);
 
@@ -28,7 +28,7 @@ public:
     inline command next(double& rx, double& ry);
 
 private:
-    mapbox::util::pbf f_;
+    std::pair< mapbox::util::pbf::const_uint32_iterator, mapbox::util::pbf::const_uint32_iterator > geo_iterator_;
     double scale_x_;
     double scale_y_;
     uint8_t cmd;
@@ -37,10 +37,10 @@ private:
     double ox, oy;
 };
 
-Geometry::Geometry(mapbox::util::pbf f,
+GeometryPBF::GeometryPBF(std::pair<mapbox::util::pbf::const_uint32_iterator, mapbox::util::pbf::const_uint32_iterator > geo_iterator,
                    double tile_x, double tile_y,
                    double scale_x, double scale_y)
-    : f_(f),
+    : geo_iterator_(geo_iterator),
       scale_x_(scale_x),
       scale_y_(scale_y),
       cmd(1),
@@ -48,11 +48,10 @@ Geometry::Geometry(mapbox::util::pbf f,
       x(tile_x), y(tile_y),
       ox(0), oy(0) {}
 
-Geometry::command Geometry::next(double& rx, double& ry) {
-    if (f_) {
+GeometryPBF::command GeometryPBF::next(double& rx, double& ry) {
+    if (geo_iterator_.first != geo_iterator_.second) {
         if (length == 0) {
-            f_.next();
-            uint32_t cmd_length = static_cast<uint32_t>(f_.get_uint32());
+            uint32_t cmd_length = static_cast<uint32_t>(*geo_iterator_.first++);
             cmd = cmd_length & 0x7;
             length = cmd_length >> 3;
         }
@@ -60,14 +59,15 @@ Geometry::command Geometry::next(double& rx, double& ry) {
         --length;
 
         if (cmd == move_to || cmd == line_to) {
-            f_.next();
-            int32_t dx = f_.get_uint32();
-            f_.next();
-            int32_t dy = f_.get_uint32();
+            int32_t dx = *geo_iterator_.first++;
+            int32_t dy = *geo_iterator_.first++;
+            std::cout << dx << " " << dy << " " << std::endl;
             dx = ((dx >> 1) ^ (-(dx & 1)));
             dy = ((dy >> 1) ^ (-(dy & 1)));
+            std::cout << dx << " " << dy << " " << std::endl;
             x += (static_cast<double>(dx) / scale_x_);
             y += (static_cast<double>(dy) / scale_y_);
+            std::cout << x << " "  << scale_x_ << " " << y << " " << scale_y_ << std::endl;
             rx = x;
             ry = y;
             if (cmd == move_to) {
@@ -90,14 +90,14 @@ Geometry::command Geometry::next(double& rx, double& ry) {
     }
 }
 
-inline mapnik::geometry::geometry<double> decode_geometry_pbf(mapbox::util::pbf const& f,
+inline mapnik::geometry::geometry<double> decode_geometry_pbf(std::pair< mapbox::util::pbf::const_uint32_iterator, mapbox::util::pbf::const_uint32_iterator> geo_iterator,
                                                   int32_t geom_type,
                                                   double tile_x, double tile_y,
                                                   double scale_x, double scale_y,
                                                   bool treat_all_rings_as_exterior=false)
 {
-    Geometry::command cmd;
-    Geometry geoms(f,tile_x,tile_y,scale_x,scale_y);
+    GeometryPBF::command cmd;
+    GeometryPBF geoms(geo_iterator,tile_x,tile_y,scale_x,scale_y);
     double x1, y1;
     mapnik::geometry::geometry<double> geom; // output geometry
 
@@ -106,7 +106,7 @@ inline mapnik::geometry::geometry<double> decode_geometry_pbf(mapbox::util::pbf 
     case vector_tile::Tile_GeomType_POINT:
     {
         mapnik::geometry::multi_point<double> mp;
-        while ((cmd = geoms.next(x1, y1)) != Geometry::end)
+        while ((cmd = geoms.next(x1, y1)) != GeometryPBF::end)
         {
             mp.emplace_back(mapnik::geometry::point<double>(x1,y1));
         }
@@ -130,9 +130,9 @@ inline mapnik::geometry::geometry<double> decode_geometry_pbf(mapbox::util::pbf 
         mapnik::geometry::multi_line_string<double> multi_line;
         multi_line.emplace_back();
         bool first = true;
-        while ((cmd = geoms.next(x1, y1)) != Geometry::end)
+        while ((cmd = geoms.next(x1, y1)) != GeometryPBF::end)
         {
-            if (cmd == Geometry::move_to)
+            if (cmd == GeometryPBF::move_to)
             {
                 if (first)
                 {
@@ -174,9 +174,9 @@ inline mapnik::geometry::geometry<double> decode_geometry_pbf(mapbox::util::pbf 
         rings.emplace_back();
         double x2,y2;
         bool first = true;
-        while ((cmd = geoms.next(x1, y1)) != Geometry::end)
+        while ((cmd = geoms.next(x1, y1)) != GeometryPBF::end)
         {
-            if (cmd == Geometry::move_to)
+            if (cmd == GeometryPBF::move_to)
             {
                 x2 = x1;
                 y2 = y1;
@@ -189,7 +189,7 @@ inline mapnik::geometry::geometry<double> decode_geometry_pbf(mapbox::util::pbf 
                     rings.emplace_back();
                 }
             }
-            else if (cmd == Geometry::close)
+            else if (cmd == GeometryPBF::close)
             {
                 rings.back().add_coord(x2,y2);
                 continue;
