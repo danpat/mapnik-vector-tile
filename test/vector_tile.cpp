@@ -32,6 +32,8 @@
 
 // vector input api
 #include "vector_tile_datasource.hpp"
+#include "vector_tile_datasource_pbf.hpp"
+#include "pbf_reader.hpp"
 
 /*
 TEST_CASE( "vector tile negative id", "hmm" ) {
@@ -357,6 +359,96 @@ TEST_CASE( "vector tile datasource", "should filter features outside extent" ) {
     // one attribute
     CHECK(f_ptr->context()->size() == 1);
 }
+
+TEST_CASE( "vector tile datasource using mapnik::util::pbf", "should filter features outside extent" ) {
+    typedef mapnik::vector_tile_impl::backend_pbf backend_type;
+    typedef mapnik::vector_tile_impl::processor<backend_type> renderer_type;
+    typedef vector_tile::Tile tile_type;
+    tile_type tile;
+    backend_type backend(tile,16);
+    unsigned tile_size = 256;
+    mapnik::box2d<double> bbox(-20037508.342789,-20037508.342789,20037508.342789,20037508.342789);
+    mapnik::Map map(tile_size,tile_size,"+init=epsg:3857");
+    mapnik::layer lyr("layer",map.srs());
+    lyr.set_datasource(testing::build_ds(0,0));
+    map.add_layer(lyr);
+    mapnik::request m_req(tile_size,tile_size,bbox);
+    renderer_type ren(backend,map,m_req);
+    ren.apply();
+    std::string key("");
+    CHECK(false == mapnik::vector_tile_impl::is_solid_extent(tile,key));
+    CHECK("" == key);
+    CHECK(1 == tile.layers_size());
+    vector_tile::Tile_Layer const& layer = tile.layers(0);
+    CHECK(std::string("layer") == layer.name());
+    CHECK(1 == layer.features_size());
+    vector_tile::Tile_Feature const& f = layer.features(0);
+    CHECK(static_cast<mapnik::value_integer>(1) == static_cast<mapnik::value_integer>(f.id()));
+    CHECK(3 == f.geometry_size());
+    CHECK(9 == f.geometry(0));
+    CHECK(4096 == f.geometry(1));
+    CHECK(4096 == f.geometry(2));
+
+    // now actually start the meat of the test
+
+    // Serialize the Protobuf generated above
+    std::string pbuf;
+    tile.SerializeToString(&pbuf);
+
+    // Now construct a pbf.hpp reader
+    mapbox::util::pbf pbf_tile(pbuf.c_str(), pbuf.size());
+    // First message should be the layer created above
+    pbf_tile.next();
+    mapbox::util::pbf pbf_layer { pbf_tile.get_message() };
+
+    mapnik::vector_tile_impl::tile_datasource_pbf ds(pbf_layer,0,0,0,tile_size);
+    mapnik::featureset_ptr fs;
+
+    // ensure we can query single feature
+    fs = ds.features(mapnik::query(bbox));
+    mapnik::feature_ptr feat = fs->next();
+    CHECK(feat != mapnik::feature_ptr());
+    CHECK(feat->size() == 0);
+    CHECK(fs->next() == mapnik::feature_ptr());
+    mapnik::query qq = mapnik::query(mapnik::box2d<double>(-1,-1,1,1));
+    qq.add_property_name("name");
+    fs = ds.features(qq);
+    feat = fs->next();
+    CHECK(feat != mapnik::feature_ptr());
+    CHECK(feat->size() == 1);
+//    CHECK(feat->get("name") == "null island");
+
+    // now check that datasource api throws out feature which is outside extent
+    fs = ds.features(mapnik::query(mapnik::box2d<double>(-10,-10,-10,-10)));
+    CHECK(fs->next() == mapnik::feature_ptr());
+
+    // ensure same behavior for feature_at_point
+    fs = ds.features_at_point(mapnik::coord2d(0.0,0.0),0.0001);
+    CHECK(fs->next() != mapnik::feature_ptr());
+
+    fs = ds.features_at_point(mapnik::coord2d(1.0,1.0),1.0001);
+    CHECK(fs->next() != mapnik::feature_ptr());
+
+    fs = ds.features_at_point(mapnik::coord2d(-10,-10),0);
+    CHECK(fs->next() == mapnik::feature_ptr());
+
+    // finally, make sure attributes are also filtered
+    mapnik::feature_ptr f_ptr;
+    fs = ds.features(mapnik::query(bbox));
+    f_ptr = fs->next();
+    CHECK(f_ptr != mapnik::feature_ptr());
+    // no attributes
+    CHECK(f_ptr->context()->size() == 0);
+
+    mapnik::query q(bbox);
+    q.add_property_name("name");
+    fs = ds.features(q);
+    f_ptr = fs->next();
+    CHECK(f_ptr != mapnik::feature_ptr());
+    // one attribute
+    CHECK(f_ptr->context()->size() == 1);
+}
+
 
 TEST_CASE( "backend does not crash on misusage", "adding feature before layer" ) {
     vector_tile::Tile tile;
