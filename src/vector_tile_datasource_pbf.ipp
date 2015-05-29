@@ -140,7 +140,7 @@ namespace mapnik { namespace vector_tile_impl {
                                             {
                                                 feature->put(name, static_cast<mapnik::value_double>(val.get<float>()));
                                             } else {
-                                                std::cerr << "  Didn't know the type of the value" << std::endl;
+                                                throw std::runtime_error("unknown attribute type while reading feature");
                                             }
                                             ++tagcount;
                                         }
@@ -219,8 +219,7 @@ namespace mapnik { namespace vector_tile_impl {
                             }
                             break;
                         default:
-                            std::cout << "No handler" << std::endl;
-                            break;
+                            throw std::runtime_error("unknown field type in feature");
 
                     }
                 }
@@ -307,7 +306,7 @@ namespace mapnik { namespace vector_tile_impl {
                                 layer_values_.push_back(val_msg.get_bool());
                                 break;
                             default:
-                                break;
+                                throw std::runtime_error("unknown attribute type in layer");
                         }
                     }
                     break;
@@ -315,7 +314,7 @@ namespace mapnik { namespace vector_tile_impl {
                     layer_extent_ = layer_.get_uint32();
                     break;
                 default:
-                    break;
+                    throw std::runtime_error("unknown PBF field in layer");
             }
         }
         scale_ = (static_cast<double>(layer_extent_) / tile_size_) * tile_size_/resolution;
