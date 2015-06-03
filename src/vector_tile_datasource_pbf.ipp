@@ -251,7 +251,7 @@ namespace mapnik { namespace vector_tile_impl {
                                      unsigned z,
                                      unsigned tile_size)
         : datasource(parameters()),
-          desc_("in-memory datasource","utf-8"),
+          desc_("in-memory PBF encoded datasource","utf-8"),
           attributes_added_(false),
           layer_(layer),
           x_(x),
@@ -312,6 +312,9 @@ namespace mapnik { namespace vector_tile_impl {
                     break;
                 case 5:
                     layer_extent_ = layer_.get_uint32();
+                    break;
+                case 15:
+                    layer_.skip();
                     break;
                 default:
                     throw std::runtime_error("unknown PBF field in layer");
